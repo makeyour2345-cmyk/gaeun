@@ -22,7 +22,7 @@ Original file is located at
 ## 셀 1 · 라이브러리 설치
 """
 
-!pip install finance-datareader requests -q
+
 
 """## 셀 2 · 라이브러리 임포트"""
 
