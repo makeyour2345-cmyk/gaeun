@@ -951,63 +951,59 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
         print(f"  ❌ 에러 발생: {resp.text}")
         raise Exception(f"노션 업데이트 실패! 사유: {resp.text}")
 
-# --- (함수 5) 국민연금 최근 2주 공시 긁어오기 (안전 버전) ---
+# --- (함수 5) 국민연금 공시 긁어오기 (6개월 딥서치 버전) ---
 def fetch_nps_dart_data():
     import requests
     import datetime
     import os
-    print('\n[Step E] 국민연금공단 DART 공시 조회 중...')
+    print('\n[Step E] 국민연금공단 DART 공시 조회 중 (최근 6개월)...')
     
     api_key = os.environ.get('DART_API_KEY')
     if not api_key:
-        print("  ⚠️ DART API 키가 없습니다. 깃허브 Secrets에 DART_API_KEY를 확인하세요.")
+        print("  ⚠️ DART API 키가 없습니다.")
         return []
-
-    # 최근 90일치 데이터 검색
-    today = datetime.datetime.today()
-    bgn_de = (today - datetime.timedelta(days=90)).strftime('%Y%m%d')
-    end_de = today.strftime('%Y%m%d')
 
     url = "https://opendart.fss.or.kr/api/list.json"
-    params = {
-        'crtfc_key': api_key,
-        'bgn_de': bgn_de,
-        'end_de': end_de,
-        'pblntf_detail_ty': 'I001', # I001: 주식등의대량보유상황보고서
-        'page_count': 100
-    }
-    
-    try:
-        res = requests.get(url, params=params)
-        data = res.json()
-        
-        nps_list = []
-        if data.get('status') == '000':
-            for item in data.get('list', []):
-                # 제출인이 '국민연금'이 포함된 것만 뽑기
-                if '국민연금' in item.get('flr_nm', ''):
-                    nps_list.append({
-                        'corp_name': item.get('corp_name'),
-                        'date': item.get('rcept_dt')
-                    })
-        print(f"  ✅ 국민연금 공시 {len(nps_list)}건 찾음!")
-        return nps_list
-    except Exception as e:
-        print(f"  ❌ DART 조회 실패: {e}")
-        return []
+    nps_list = []
+    today = datetime.datetime.today()
 
-# --- (함수 6) 노션에 국민연금 표 깔끔하게 업데이트 (중복 삭제 기능 포함) ---
+    # DART는 한 번에 3개월만 검색 가능하므로, 3개월씩 2번(총 6개월) 뒤집니다!
+    for i in range(2):
+        end_date = today - datetime.timedelta(days=i*90)
+        start_date = end_date - datetime.timedelta(days=90)
+
+        params = {
+            'crtfc_key': api_key,
+            'bgn_de': start_date.strftime('%Y%m%d'),
+            'end_de': end_date.strftime('%Y%m%d'),
+            'pblntf_detail_ty': 'I001', # 대량보유 공시만
+            'page_count': 100
+        }
+        try:
+            res = requests.get(url, params=params)
+            data = res.json()
+            if data.get('status') == '000':
+                for item in data.get('list', []):
+                    # 제출인 이름에 국민연금이 있으면 싹 다 긁어모음
+                    if '국민연금' in item.get('flr_nm', '') or '국민연금' in item.get('report_nm', ''):
+                        nps_list.append({
+                            'corp_name': item.get('corp_name'),
+                            'date': item.get('rcept_dt')
+                        })
+        except Exception as e:
+            pass # 에러 나도 조용히 다음 기간 검색
+
+    print(f"  ✅ 국민연금 공시 총 {len(nps_list)}건 찾음!")
+    return nps_list
+
+# --- (함수 6) 노션에 국민연금 표 깔끔하게 업데이트 (0건 방어 추가) ---
 def update_nps_table_in_notion(main_page_id, nps_data):
     import requests
     print('\n[Step F] 노션에 국민연금 표 전송 중...')
     clean_page_id = main_page_id.replace('-', '')
-    
-    if not nps_data:
-        print("  ⚠️ 업데이트할 국민연금 데이터가 없습니다.")
-        return
 
-    # 1. 꼬임 방지를 위해 기존에 생성된 국민연금 표 지우기
-    blocks = notion_get(f'blocks/{clean_page_id}/children').get('results', [])
+    # 1. 기존 표 싹 다 지우기 (초기화)
+    blocks = requests.get(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS).json().get('results', [])
     delete_ids = []
     is_target_section = False
     
@@ -1035,18 +1031,29 @@ def update_nps_table_in_notion(main_page_id, nps_data):
         ]}
     }]
     
-    # 3. 데이터 채워넣기 (노션 표가 너무 길어지지 않게 최신 15개까지만)
-    for row in nps_data[:15]:
+    # 🌟 3. 만약 진짜 0건이더라도 빈칸으로 표를 만들어 버립니다!
+    if not nps_data:
         table_rows.append({
             "object": "block",
             "type": "table_row",
             "table_row": {"cells": [
-                [{"type": "text", "text": {"content": row['corp_name']}}],
-                [{"type": "text", "text": {"content": row['date']}}]
+                [{"type": "text", "text": {"content": "최근 6개월 매매 공시 없음"}, "annotations": {"color": "gray"}}],
+                [{"type": "text", "text": {"content": "-"}}]
             ]}
         })
+    else:
+        # 데이터가 있으면 최신순으로 15개까지만 넣기
+        for row in nps_data[:15]:
+            table_rows.append({
+                "object": "block",
+                "type": "table_row",
+                "table_row": {"cells": [
+                    [{"type": "text", "text": {"content": row['corp_name']}}],
+                    [{"type": "text", "text": {"content": row['date']}}]
+                ]}
+            })
     
-    # 4. 맨 아래에 꽂아넣기
+    # 4. 맨 아래에 전송
     new_blocks = [
         {'object': 'block', 'type': 'divider', 'divider': {}},
         {'object': 'block', 'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '🏢 최근 국민연금 매매 동향 (DART)'}}]}},
