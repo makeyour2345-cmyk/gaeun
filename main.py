@@ -755,10 +755,10 @@ else:
     else:
         # ✏️ 직접 입력이 필요할 경우 여기에 ID를 넣으세요
         config = {
-            'MAIN_PAGE_ID':       '381f694e3535813eadeff12603664a3a',
-            'TRADE_DB_ID':        '여기에_매매일지_DB_ID_입력',
-            'HOLDINGS_DB_ID':     '여기에_보유주식_DB_ID_입력',
-            'TOTAL_ASSETS_DB_ID': '여기에_총자산_DB_ID_입력'
+            'MAIN_PAGE_ID':       '382f694e353581c38d1ff7f9965d54e4',
+            'TRADE_DB_ID':        '382f694e353581ad80a3fd6d0d043371',
+            'HOLDINGS_DB_ID':     '382f694e353581a681bbf2e780a33dfd',
+            'TOTAL_ASSETS_DB_ID': '382f694e353581dabf85f8c7791da870'
         }
         print('⚠️ 직접 입력 모드: 설정된 ID로 동기화를 시도합니다.')
 
