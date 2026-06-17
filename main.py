@@ -692,88 +692,80 @@ def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
     return True, category_totals
 
 
-# --- (함수 2) 노션에 2단 레이아웃(차트 + 금액 표)으로 업데이트하는 함수 ---
+# --- (함수 2) 노션에 2단 레이아웃(차트 + 금액 표)으로 강력하게 업데이트하는 함수 ---
 def update_chart_in_notion(main_page_id, github_user, github_repo, category_totals):
+    import requests
     print('\n[Step B] 노션 페이지 파이차트 및 금액 표 업데이트...')
     clean_page_id = main_page_id.replace('-', '')
 
     timestamp = int(time.time())
     raw_image_url = f"https://raw.githubusercontent.com/{github_user}/{github_repo}/main/portfolio_chart.png?v={timestamp}"
 
-    # 1. 오른쪽에 들어갈 요약 표(콜아웃)의 글씨 꾸미기
+    # 1. 오른쪽에 들어갈 요약 표(콜아웃) 텍스트 구성
     callout_rich_text = [{"type": "text", "text": {"content": "📊 분류별 평가금액 요약\n\n" }, "annotations": {"bold": True}}]
     for cat, amt in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
         callout_rich_text.append({"type": "text", "text": {"content": f"• {cat} : "}, "annotations": {"bold": False}})
         callout_rich_text.append({"type": "text", "text": {"content": f"{int(amt):,}원\n"}, "annotations": {"bold": True, "color": "blue"}})
 
-    # 2. 메인 페이지의 하위 블록 조회 및 기존 블록 찾기
+    # 2. 기존 블록 싹 다 찾아서 지우기 (꼬임 방지 초기화)
     blocks = notion_get(f'blocks/{clean_page_id}/children').get('results', [])
-    
-    heading_found = False
-    old_column_list_id = None
-
     for block in blocks:
+        # 기존 제목 지우기
         if block['type'] == 'heading_2' and '분류별 비율' in block.get('heading_2', {}).get('rich_text', [{}])[0].get('text', {}).get('content', ''):
-            heading_found = True
+            requests.delete(f"{BASE}/blocks/{block['id']}", headers=HEADERS)
+        # 기존 이미지 지우기
+        if block['type'] == 'image' and 'portfolio_chart' in block.get('image', {}).get('external', {}).get('url', ''):
+            requests.delete(f"{BASE}/blocks/{block['id']}", headers=HEADERS)
+        # 기존 2단 레이아웃(단) 지우기
         if block['type'] == 'column_list':
-            old_column_list_id = block['id']
+            requests.delete(f"{BASE}/blocks/{block['id']}", headers=HEADERS)
 
-    # 🔄 이미 만들어진 단(Column)이 있다면 중복 방지를 위해 삭제
-    if old_column_list_id:
-        try:
-            import requests
-            requests.delete(f'{BASE}/blocks/{old_column_list_id}', headers=HEADERS)
-            print("  🔄 기존 단(Column) 블록 삭제 완료")
-        except Exception as e:
-            print(f"  ⚠️ 기존 블록 삭제 실패: {e}")
-
-    # 3. 2단 레이아웃 블록 구성 (왼쪽: 이미지, 오른쪽: 금액 표)
-    column_list_block = {
-        'type': 'column_list',
-        'column_list': {},
-        'children': [
-            {
-                'type': 'column',
-                'column': {},
-                'children': [
-                    {
-                        'type': 'image',
-                        'image': {
-                            'type': 'external',
-                            'external': {'url': raw_image_url}
-                        }
-                    }
-                ]
-            },
-            {
-                'type': 'column',
-                'column': {},
-                'children': [
-                    {
-                        'type': 'callout',
-                        'callout': {
-                            'rich_text': callout_rich_text,
-                            'icon': {'type': 'emoji', 'emoji': '💰'},
-                            'color': 'gray_background'
-                        }
-                    }
-                ]
-            }
-        ]
-    }
-
-    # 4. 노션에 최종 반영
-    if not heading_found:
-        new_blocks = [
-            {'type': 'divider', 'divider': {}},
-            {'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '📊 분류별 비율'}}]}},
-            column_list_block
-        ]
-        notion_patch(f'blocks/{clean_page_id}/children', {'children': new_blocks})
-        print("  ➕ 파이차트 및 금액 표 섹션 신규 생성 완료")
+    # 3. 새로운 2단 레이아웃 완벽한 규격으로 세팅
+    new_blocks = [
+        {
+            'object': 'block',
+            'type': 'divider',
+            'divider': {}
+        },
+        {
+            'object': 'block',
+            'type': 'heading_2',
+            'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '📊 분류별 비율'}}]}
+        },
+        {
+            'object': 'block',
+            'type': 'column_list',
+            'column_list': {},
+            'children': [
+                {
+                    'object': 'block',
+                    'type': 'column',
+                    'column': {},
+                    'children': [
+                        {'object': 'block', 'type': 'image', 'image': {'type': 'external', 'external': {'url': raw_image_url}}}
+                    ]
+                },
+                {
+                    'object': 'block',
+                    'type': 'column',
+                    'column': {},
+                    'children': [
+                        {'object': 'block', 'type': 'callout', 'callout': {'rich_text': callout_rich_text, 'icon': {'type': 'emoji', 'emoji': '💰'}, 'color': 'gray_background'}}
+                    ]
+                }
+            ]
+        }
+    ]
+    
+    # 4. 노션 API로 강력하게 업데이트 요청 (실패 시 무조건 에러 뿜게 만들기)
+    print("  ⏳ 노션에 새로운 2단 레이아웃 전송 중...")
+    resp = requests.patch(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS, json={'children': new_blocks})
+    
+    if resp.status_code == 200:
+        print("  ✅ 파이차트 및 금액 표 업데이트 성공!")
     else:
-        notion_patch(f'blocks/{clean_page_id}/children', {'children': [column_list_block]})
-        print("  ⚡ 분류별 레이아웃(단) 업데이트 완료")
+        print(f"  ❌ 에러 발생: {resp.text}")
+        raise Exception("노션 업데이트 실패! 로그를 확인하세요.")
 
 """## 셀 15 · 🚀 실행
 > - **최초 설정 시** (`SETUP_MODE = True`): 페이지 생성 + DB 생성 + 초기 데이터 입력
