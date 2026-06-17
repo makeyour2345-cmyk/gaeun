@@ -888,7 +888,7 @@ def analyze_interest_stocks():
     print(f"  ✅ 3단 선 그래프(시계열) 차트 저장 완료: {save_path}")
     return results
     
-# --- (함수 4) 노션에 관심종목 차트와 표 업데이트 ---
+# --- (함수 4) 노션에 관심종목 차트와 표 강력하게 업데이트 ---
 def update_interest_in_notion(main_page_id, github_user, github_repo, results):
     import requests
     import time
@@ -896,22 +896,32 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
     clean_page_id = main_page_id.replace('-', '')
     raw_image_url = f"https://raw.githubusercontent.com/{github_user}/{github_repo}/main/interest_chart.png?v={int(time.time())}"
 
-    # 1. 꼬임 방지를 위해 기존 블록 싹 지우기
-    blocks = notion_get(f'blocks/{clean_page_id}/children').get('results', [])
-    delete_mode = False
+    # 1. 꼬임 방지를 위해 기존 블록 아주 깨끗하게 지우기
+    blocks = requests.get(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS).json().get('results', [])
+    delete_ids = []
+    is_target_section = False
+    
     for block in blocks:
         if block['type'] == 'heading_2' and '관심종목 지수대비 분석' in block.get('heading_2', {}).get('rich_text', [{}])[0].get('text', {}).get('content', ''):
-            delete_mode = True
-            requests.delete(f"{BASE}/blocks/{block['id']}", headers=HEADERS)
+            is_target_section = True
+            delete_ids.append(block['id'])
             continue
-        if delete_mode:
+            
+        if is_target_section:
             if block['type'] in ['image', 'table', 'divider']:
-                requests.delete(f"{BASE}/blocks/{block['id']}", headers=HEADERS)
-            elif block['type'] == 'heading_2': # 다른 섹션 넘어가면 정지
-                delete_mode = False
+                delete_ids.append(block['id'])
+            elif block['type'] == 'heading_2': # 다른 섹션 나오면 삭제 중지
+                is_target_section = False
+                
+    for b_id in delete_ids:
+        requests.delete(f"{BASE}/blocks/{b_id}", headers=HEADERS)
 
-    # 2. 노션 표(Table) 데이터 만들기
-    table_rows = [{
+    # 2. 노션 표(Table) 데이터 완벽한 규격으로 조립하기
+    table_rows = []
+    
+    # 2-1. 표 머리글(헤더)
+    table_rows.append({
+        "object": "block",
         "type": "table_row",
         "table_row": {"cells": [
             [{"type": "text", "text": {"content": "종목명"}, "annotations": {"bold": True}}],
@@ -921,23 +931,25 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
             [{"type": "text", "text": {"content": "수익률 차이"}, "annotations": {"bold": True}}],
             [{"type": "text", "text": {"content": "판정정보"}, "annotations": {"bold": True}}]
         ]}
-    }]
+    })
     
+    # 2-2. 표 내용 채우기
     for r in results:
         color = "red" if r['diff'] <= -10 else "default"
         table_rows.append({
+            "object": "block",
             "type": "table_row",
             "table_row": {"cells": [
-                [{"type": "text", "text": {"content": r['name']}}],
-                [{"type": "text", "text": {"content": r['index']}}],
+                [{"type": "text", "text": {"content": str(r['name'])}}],
+                [{"type": "text", "text": {"content": str(r['index'])}}],
                 [{"type": "text", "text": {"content": f"{r['stock_ret']:.1f}%"}}],
                 [{"type": "text", "text": {"content": f"{r['index_ret']:.1f}%"}}],
                 [{"type": "text", "text": {"content": f"{r['diff']:.1f}%"}, "annotations": {"color": color}}],
-                [{"type": "text", "text": {"content": r['status']}, "annotations": {"bold": True, "color": color}}]
+                [{"type": "text", "text": {"content": str(r['status'])}, "annotations": {"bold": True, "color": color}}]
             ]}
         })
 
-    # 3. 새로운 차트와 표 전송
+    # 3. 새로운 차트와 표 한꺼번에 전송
     new_blocks = [
         {'object': 'block', 'type': 'divider', 'divider': {}},
         {'object': 'block', 'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '📊 관심종목 지수대비 분석'}}]}},
@@ -945,11 +957,15 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
         {'object': 'block', 'type': 'table', 'table': {'table_width': 6, 'has_column_header': True, 'has_row_header': False, 'children': table_rows}}
     ]
 
+    print("  ⏳ 노션에 표와 차트 전송 중...")
     resp = requests.patch(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS, json={'children': new_blocks})
+    
     if resp.status_code == 200:
-        print("  ✅ 노션 표 및 관심종목 차트 업데이트 성공!")
+        print("  ✅ 노션 표 및 3단 선 그래프 업데이트 성공!")
     else:
+        # 에러를 숨기지 않고 무조건 빨간불(Exception) 띄우기
         print(f"  ❌ 에러 발생: {resp.text}")
+        raise Exception(f"노션 업데이트 실패! 사유: {resp.text}")
         
 """## 셀 15 · 🚀 실행
 > - **최초 설정 시** (`SETUP_MODE = True`): 페이지 생성 + DB 생성 + 초기 데이터 입력
