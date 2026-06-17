@@ -1068,8 +1068,12 @@ def update_nps_table_in_notion(main_page_id, nps_data):
     else:
         print(f"  ❌ 노션 전송 에러: {resp.text}")
 
+# ================= [최종 실행 코드 구역 - 여기서부터 복사하세요!] =================
 if __name__ == "__main__":
     import os
+    import requests
+    import FinanceDataReader as fdr
+
     NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
     BASE = "https://api.notion.com/v1"
     HEADERS = {
@@ -1081,24 +1085,57 @@ if __name__ == "__main__":
     GITHUB_USERNAME = "makeyour2345-cmyk"
     GITHUB_REPO_NAME = "gaeun"
     
+    # ✏️ 본인의 노션 ID 입력 (파이차트를 위해 HOLDINGS_DB_ID 꼭 넣어주세요!)
     config = {
         'MAIN_PAGE_ID':       '382f694e353581c38d1ff7f9965d54e4',
-        'TRADE_DB_ID':        '382f694e353581ad80a3fd6d0d043371',
-        'HOLDINGS_DB_ID':     '382f694e353581a681bbf2e780a33dfd',
+        'TRADE_DB_ID':        '382f694e353581ad80a3fd6d0d043371', 
+        'HOLDINGS_DB_ID':     '382f694e353581a681bbf2e780a33dfd', # 👈 파이차트 복구를 위해 필수!
         'TOTAL_ASSETS_DB_ID': '382f694e353581dabf85f8c7791da870'
     }
 
-    # 1. 파이차트 및 금액 표 업데이트 (기존)
-    chart_generated, cat_totals = generate_pie_chart(holdings, prices)
-    if chart_generated:
-        update_chart_in_notion(config['MAIN_PAGE_ID'], GITHUB_USERNAME, GITHUB_REPO_NAME, cat_totals)
+    # --- 1. 잃어버린 파이차트용 주식 데이터(holdings) 완벽 복구 ---
+    holdings = {}
+    prices = {}
+    try:
+        print("\n[Step 0] 노션 DB에서 보유주식 데이터 가져오는 중...")
+        db_res = requests.post(f"{BASE}/databases/{config['HOLDINGS_DB_ID']}/query", headers=HEADERS)
+        if db_res.status_code == 200:
+            results = db_res.json().get('results', [])
+            for row in results:
+                props = row['properties']
+                try:
+                    ticker = props.get('티커', {}).get('rich_text', [{}])[0].get('text', {}).get('content', '')
+                    category = props.get('분류', {}).get('select', {}).get('name', '기타')
+                    qty = props.get('보유수량', {}).get('number', 0)
+                    total_buy = props.get('총매입금액', {}).get('number', 0)
 
-    # 2. 관심종목 차트 및 표 업데이트 (기존)
+                    if ticker and qty and qty > 0:
+                        holdings[ticker] = {'보유수량': qty, '총매입금액': total_buy, '분류': category}
+                        
+                        # 현재가 가져오기
+                        try:
+                            prices[ticker] = fdr.DataReader(ticker)['Close'].iloc[-1]
+                        except:
+                            prices[ticker] = total_buy / qty
+                except Exception:
+                    continue
+            print(f"  ✅ {len(holdings)}개 종목 데이터 복구 완료!")
+        else:
+            print("  ⚠️ 보유주식 DB를 읽을 수 없습니다. DB ID를 확인해주세요.")
+    except Exception as e:
+        print(f"  ❌ 데이터 복구 중 에러 발생: {e}")
+
+    # --- 2. 파이차트 및 금액 표 업데이트 ---
+    if holdings:
+        chart_generated, cat_totals = generate_pie_chart(holdings, prices)
+        if chart_generated:
+            update_chart_in_notion(config['MAIN_PAGE_ID'], GITHUB_USERNAME, GITHUB_REPO_NAME, cat_totals)
+
+    # --- 3. 📈 관심종목 3단 선 그래프 및 분석 표 업데이트 ---
     interest_results = analyze_interest_stocks()
     update_interest_in_notion(config['MAIN_PAGE_ID'], GITHUB_USERNAME, GITHUB_REPO_NAME, interest_results)
 
-    # 3. 국민연금 공시 업데이트 (★ 방금 만든 2줄은 여기로 와야 합니다!)
-    # 위에 있는 interest_results... 와 왼쪽 시작 위치(빈칸 개수)가 완벽하게 똑같아야 합니다.
+    # --- 4. 🏢 국민연금 공시 표 업데이트 ---
     nps_results = fetch_nps_dart_data()
     update_nps_table_in_notion(config['MAIN_PAGE_ID'], nps_results)
    
