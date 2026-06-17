@@ -691,7 +691,6 @@ def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
     print(f"  ✅ 파이차트 저장 완료: {save_path}")
     return True, category_totals
 
-
 # --- (함수 2) 노션에 2단 레이아웃(차트 + 금액 표)으로 강력하게 업데이트하는 함수 ---
 def update_chart_in_notion(main_page_id, github_user, github_repo, category_totals):
     import requests
@@ -710,17 +709,14 @@ def update_chart_in_notion(main_page_id, github_user, github_repo, category_tota
     # 2. 기존 블록 싹 다 찾아서 지우기 (꼬임 방지 초기화)
     blocks = notion_get(f'blocks/{clean_page_id}/children').get('results', [])
     for block in blocks:
-        # 기존 제목 지우기
         if block['type'] == 'heading_2' and '분류별 비율' in block.get('heading_2', {}).get('rich_text', [{}])[0].get('text', {}).get('content', ''):
             requests.delete(f"{BASE}/blocks/{block['id']}", headers=HEADERS)
-        # 기존 이미지 지우기
         if block['type'] == 'image' and 'portfolio_chart' in block.get('image', {}).get('external', {}).get('url', ''):
             requests.delete(f"{BASE}/blocks/{block['id']}", headers=HEADERS)
-        # 기존 2단 레이아웃(단) 지우기
         if block['type'] == 'column_list':
             requests.delete(f"{BASE}/blocks/{block['id']}", headers=HEADERS)
 
-    # 3. 새로운 2단 레이아웃 완벽한 규격으로 세팅
+    # 3. 새로운 2단 레이아웃 완벽한 규격으로 세팅 (에러 해결 완료!)
     new_blocks = [
         {
             'object': 'block',
@@ -735,29 +731,32 @@ def update_chart_in_notion(main_page_id, github_user, github_repo, category_tota
         {
             'object': 'block',
             'type': 'column_list',
-            'column_list': {},
-            'children': [
-                {
-                    'object': 'block',
-                    'type': 'column',
-                    'column': {},
-                    'children': [
-                        {'object': 'block', 'type': 'image', 'image': {'type': 'external', 'external': {'url': raw_image_url}}}
-                    ]
-                },
-                {
-                    'object': 'block',
-                    'type': 'column',
-                    'column': {},
-                    'children': [
-                        {'object': 'block', 'type': 'callout', 'callout': {'rich_text': callout_rich_text, 'icon': {'type': 'emoji', 'emoji': '💰'}, 'color': 'gray_background'}}
-                    ]
-                }
-            ]
+            'column_list': {
+                'children': [
+                    {
+                        'object': 'block',
+                        'type': 'column',
+                        'column': {
+                            'children': [
+                                {'object': 'block', 'type': 'image', 'image': {'type': 'external', 'external': {'url': raw_image_url}}}
+                            ]
+                        }
+                    },
+                    {
+                        'object': 'block',
+                        'type': 'column',
+                        'column': {
+                            'children': [
+                                {'object': 'block', 'type': 'callout', 'callout': {'rich_text': callout_rich_text, 'icon': {'type': 'emoji', 'emoji': '💰'}, 'color': 'gray_background'}}
+                            ]
+                        }
+                    }
+                ]
+            }
         }
     ]
     
-    # 4. 노션 API로 강력하게 업데이트 요청 (실패 시 무조건 에러 뿜게 만들기)
+    # 4. 노션 API로 강력하게 업데이트 요청
     print("  ⏳ 노션에 새로운 2단 레이아웃 전송 중...")
     resp = requests.patch(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS, json={'children': new_blocks})
     
