@@ -550,7 +550,7 @@ def run_sync(main_page_id, trade_db_id, holdings_db_id, total_db_id):
     if chart_generated:
         update_chart_in_notion(main_page_id, GITHUB_USERNAME, GITHUB_REPO_NAME, cat_totals)
     # ================= 2줄 추가 =================
-interest_results = analyze_interest_stocks()
+    interest_results = analyze_interest_stocks()
     update_interest_in_notion(main_page_id, GITHUB_USERNAME, GITHUB_REPO_NAME, interest_results)
 
 """## 셀 14 · 초기 설정 함수 (수정 불필요)"""
