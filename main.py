@@ -653,8 +653,10 @@ import matplotlib.pyplot as plt
 import time
 from collections import defaultdict
 
-# --- (함수 1) 파이차트 이미지 생성 함수 (금액 데이터도 같이 반환하도록 수정) ---
+# --- (함수 1) 파이차트 이미지 생성 함수 ---
 def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
+    import matplotlib.pyplot as plt
+    from collections import defaultdict
     print('\n[Step A] 분류별 비율 계산 및 파이차트 생성...')
 
     # 1. 분류별 평가금액 집계
@@ -669,9 +671,10 @@ def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
         print("  ⚠️ 보유 주식이 없어 차트를 생성하지 않습니다.")
         return False, {}
 
-    # 2. 차트 데이터 준비
-    labels = list(category_totals.keys())
-    sizes = list(category_totals.values())
+    # 🌟 [문제 해결 포인트!] 표와 완벽하게 똑같이 '금액이 큰 순서대로' 정렬합니다.
+    sorted_totals = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
+    labels = [item[0] for item in sorted_totals]
+    sizes = [item[1] for item in sorted_totals]
 
     # 3. 파이차트 그리기
     plt.figure(figsize=(7, 7))
@@ -686,7 +689,7 @@ def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
             wedgeprops={'edgecolor': 'white', 'linewidth': 1.5})
     plt.title('분류별 자산 비중', fontsize=15, pad=20)
 
-    # 4. 이미지 파일로 로컬(현재 폴더)에 저장
+    # 4. 이미지 저장
     plt.savefig(save_path, bbox_inches='tight', dpi=150)
     plt.close()
 
