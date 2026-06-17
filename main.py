@@ -768,17 +768,19 @@ def update_chart_in_notion(main_page_id, github_user, github_repo, category_tota
         print(f"  ❌ 에러 발생: {resp.text}")
         raise Exception("노션 업데이트 실패! 로그를 확인하세요.")
 
-# --- (함수 3) 관심종목 수익률 분석 및 차트 생성 ---
+# --- (함수 3) 관심종목 지수별 시계열 선 그래프 및 수익률 분석 ---
 def analyze_interest_stocks():
     import datetime
-    import numpy as np
+    import pandas as pd
     import FinanceDataReader as fdr
     import matplotlib.pyplot as plt
-    print('\n[Step C] 관심종목 지수대비 수익률 분석...')
+    import matplotlib.dates as mdates
+    print('\n[Step C] 관심종목 지수별 시계열 차트 및 수익률 분석...')
     
+    # 1. 종목 및 지수 세팅
     stocks = [
         {'name': '테슬라', 'ticker': 'TSLA', 'index': '나스닥100'},
-        {'name': '구글', 'ticker': 'GOOG', 'index': '나스닥100'},
+        {'name': '구글(알파벳)', 'ticker': 'GOOG', 'index': '나스닥100'},
         {'name': '엔비디아', 'ticker': 'NVDA', 'index': '나스닥100'},
         {'name': 'SK하이닉스', 'ticker': '000660', 'index': '코스피200'},
         {'name': '현대자동차', 'ticker': '005380', 'index': '코스피200'},
@@ -791,65 +793,101 @@ def analyze_interest_stocks():
         {'name': '코카콜라', 'ticker': 'KO', 'index': 'S&P500'}
     ]
 
-    # 안정적인 데이터 조회를 위해 지수 추종 대표 ETF를 프록시로 사용
     index_tickers = {'나스닥100': 'QQQ', '코스피200': '069500', 'S&P500': 'SPY'}
     
     today = datetime.date.today()
     six_months_ago = today - datetime.timedelta(days=180)
 
-    # 1. 지수 수익률 계산
-    index_returns = {}
+    timeseries_data = {}
+    final_returns = {}
+
+    # 2. 지수 및 종목 일별 데이터 가져오기 (누적 수익률 계산)
+    print("  데이터를 수집하고 있습니다. 잠시만 기다려주세요...")
     for idx_name, idx_ticker in index_tickers.items():
         try:
             df = fdr.DataReader(idx_ticker, six_months_ago, today)
-            index_returns[idx_name] = (df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0] * 100 if len(df) > 0 else 0
+            if len(df) > 0:
+                df['cum_ret'] = (df['Close'] / df['Close'].iloc[0] - 1) * 100
+                timeseries_data[idx_name] = df['cum_ret']
+                final_returns[idx_name] = df['cum_ret'].iloc[-1]
         except:
-            index_returns[idx_name] = 0
+            pass
 
-    # 2. 종목 수익률 계산 및 판정
-    results = []
     for s in stocks:
         try:
             df = fdr.DataReader(s['ticker'], six_months_ago, today)
-            ret = (df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0] * 100 if len(df) > 0 else 0
+            if len(df) > 0:
+                df['cum_ret'] = (df['Close'] / df['Close'].iloc[0] - 1) * 100
+                timeseries_data[s['name']] = df['cum_ret']
+                final_returns[s['name']] = df['cum_ret'].iloc[-1]
+            else:
+                final_returns[s['name']] = 0
         except:
-            ret = 0
+            final_returns[s['name']] = 0
 
-        idx_ret = index_returns.get(s['index'], 0)
+    # 3. 표(Table)에 들어갈 분석 결과 정리 (-10% 손절 판정 로직 포함)
+    results = []
+    for s in stocks:
+        ret = final_returns.get(s['name'], 0)
+        idx_ret = final_returns.get(s['index'], 0)
         diff = ret - idx_ret
         status = '🔴 손절 검토' if diff <= -10 else '🟢 유지'
-        results.append({'name': s['name'], 'index': s['index'], 'stock_ret': ret, 'index_ret': idx_ret, 'diff': diff, 'status': status})
+        results.append({
+            'name': s['name'], 'index': s['index'], 
+            'stock_ret': ret, 'index_ret': idx_ret, 
+            'diff': diff, 'status': status
+        })
 
-    # 3. 막대 차트 그리기
-    plt.figure(figsize=(14, 6))
+    # 4. 3개의 선 그래프 그리기 (위아래로 배치)
     try:
         plt.rcParams['font.family'] = 'NanumGothic'
     except:
         pass
     plt.rcParams['axes.unicode_minus'] = False
 
-    names = [r['name'] for r in results]
-    stock_rets = [r['stock_ret'] for r in results]
-    index_rets = [r['index_ret'] for r in results]
+    # 세로로 3칸짜리 도화지 생성
+    fig, axes = plt.subplots(3, 1, figsize=(12, 16))
+    fig.suptitle('📈 최근 6개월 관심종목 vs 기준지수 추이', fontsize=20, fontweight='bold', y=0.92)
 
-    x = np.arange(len(names))
-    width = 0.35
+    indices = ['코스피200', '나스닥100', 'S&P500']
+    
+    for i, idx_name in enumerate(indices):
+        ax = axes[i]
+        
+        # 기준지수 선 (굵은 검정 점선으로 강조)
+        if idx_name in timeseries_data:
+            ax.plot(timeseries_data[idx_name].index, timeseries_data[idx_name].values, 
+                    label=f'[{idx_name} 지수]', color='black', linewidth=3, linestyle='--')
 
-    plt.bar(x - width/2, stock_rets, width, label='종목 6개월 수익률', color='#4A90E2')
-    plt.bar(x + width/2, index_rets, width, label='기준지수 수익률', color='#D3D3D3')
-    plt.axhline(0, color='black', linewidth=1)
-    plt.xticks(x, names, rotation=45, ha='right', fontsize=10)
-    plt.ylabel('수익률 (%)', fontsize=12)
-    plt.title('📈 최근 6개월 관심종목 vs 기준지수 수익률 비교', fontsize=16, pad=20)
-    plt.legend()
-    plt.tight_layout()
+        # 개별 종목 선들 (얇은 실선)
+        group_stocks = [s['name'] for s in stocks if s['index'] == idx_name]
+        for s_name in group_stocks:
+            if s_name in timeseries_data:
+                ax.plot(timeseries_data[s_name].index, timeseries_data[s_name].values, 
+                        label=s_name, linewidth=1.5)
 
+        # 차트 꾸미기
+        ax.axhline(0, color='gray', linewidth=1, linestyle=':') # 0% 가로축
+        ax.set_title(f'{idx_name} 편입 종목 비교', fontsize=15, pad=10)
+        ax.set_ylabel('누적 성장률 (%)', fontsize=12)
+        
+        # 표기 단위 (월별)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m월'))
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        
+        # 범례 (차트 밖에 예쁘게 배치)
+        ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize=11)
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout(rect=[0, 0, 0.85, 0.9])
+    
     save_path = "interest_chart.png"
-    plt.savefig(save_path, dpi=150)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"  ✅ 관심종목 분석 차트 저장 완료: {save_path}")
+    
+    print(f"  ✅ 3단 선 그래프(시계열) 차트 저장 완료: {save_path}")
     return results
-
+    
 # --- (함수 4) 노션에 관심종목 차트와 표 업데이트 ---
 def update_interest_in_notion(main_page_id, github_user, github_repo, results):
     import requests
