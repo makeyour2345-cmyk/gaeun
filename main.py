@@ -540,19 +540,16 @@ def run_sync(main_page_id, trade_db_id, holdings_db_id, total_db_id):
     print('\n[Step 6] 메인 페이지 날짜 업데이트...')
     update_callout_date(main_page_id)
 
-    # ================= 추가된 부분 시작 =================
+    # ================= 수정된 부분 시작 =================
     # 본인의 GitHub 정보를 입력하세요!
-    GITHUB_USERNAME = "makeyour2345-cmyk"
+    GITHUB_USERNAME = "makeyour2345-cmyk" # 본인 아이디 확인 후 입력
     GITHUB_REPO_NAME = "gaeun"
-
-    chart_generated = generate_pie_chart(holdings, prices)
+    
+    # 두 개의 값을 받아오도록 수정되었습니다.
+    chart_generated, cat_totals = generate_pie_chart(holdings, prices)
     if chart_generated:
-        update_chart_in_notion(main_page_id, GITHUB_USERNAME, GITHUB_REPO_NAME)
-    # ================= 추가된 부분 끝 =================
-
-    print('\n' + '='*55)
-    print('✅ 동기화 완료! Notion 페이지를 새로고침하세요.')
-    print('='*55)
+        update_chart_in_notion(main_page_id, GITHUB_USERNAME, GITHUB_REPO_NAME, cat_totals)
+    # ================= 수정된 부분 끝 =================
 
 """## 셀 14 · 초기 설정 함수 (수정 불필요)"""
 
@@ -654,7 +651,7 @@ import matplotlib.pyplot as plt
 import time
 from collections import defaultdict
 
-# --- (함수 1) 파이차트 이미지 생성 함수 ---
+# --- (함수 1) 파이차트 이미지 생성 함수 (금액 데이터도 같이 반환하도록 수정) ---
 def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
     print('\n[Step A] 분류별 비율 계산 및 파이차트 생성...')
 
@@ -668,7 +665,7 @@ def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
 
     if not category_totals:
         print("  ⚠️ 보유 주식이 없어 차트를 생성하지 않습니다.")
-        return False
+        return False, {}
 
     # 2. 차트 데이터 준비
     labels = list(category_totals.keys())
@@ -679,7 +676,7 @@ def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
     try:
         plt.rcParams['font.family'] = 'NanumGothic'
     except:
-        pass
+        pass 
     plt.rcParams['axes.unicode_minus'] = False
 
     colors = plt.cm.Set3.colors
@@ -692,50 +689,91 @@ def generate_pie_chart(holdings, prices, save_path="portfolio_chart.png"):
     plt.close()
 
     print(f"  ✅ 파이차트 저장 완료: {save_path}")
-    return True
+    return True, category_totals
 
 
-# --- (함수 2) 노션에 업데이트하는 함수 ---
-def update_chart_in_notion(main_page_id, github_user, github_repo):
-    print('\n[Step B] 노션 페이지 파이차트 블록 업데이트...')
+# --- (함수 2) 노션에 2단 레이아웃(차트 + 금액 표)으로 업데이트하는 함수 ---
+def update_chart_in_notion(main_page_id, github_user, github_repo, category_totals):
+    print('\n[Step B] 노션 페이지 파이차트 및 금액 표 업데이트...')
     clean_page_id = main_page_id.replace('-', '')
 
-    # 1. GitHub Raw URL 생성 (캐시 방지용 타임스탬프 추가)
     timestamp = int(time.time())
     raw_image_url = f"https://raw.githubusercontent.com/{github_user}/{github_repo}/main/portfolio_chart.png?v={timestamp}"
 
-    # 2. 메인 페이지의 하위 블록 전체 조회
+    # 1. 오른쪽에 들어갈 요약 표(콜아웃)의 글씨 꾸미기
+    callout_rich_text = [{"type": "text", "text": {"content": "📊 분류별 평가금액 요약\n\n" }, "annotations": {"bold": True}}]
+    for cat, amt in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
+        callout_rich_text.append({"type": "text", "text": {"content": f"• {cat} : "}, "annotations": {"bold": False}})
+        callout_rich_text.append({"type": "text", "text": {"content": f"{int(amt):,}원\n"}, "annotations": {"bold": True, "color": "blue"}})
+
+    # 2. 메인 페이지의 하위 블록 조회 및 기존 블록 찾기
     blocks = notion_get(f'blocks/{clean_page_id}/children').get('results', [])
+    
+    heading_found = False
+    old_column_list_id = None
 
-    chart_heading_id = None
-    chart_image_id = None
-
-    # 3. 기존에 생성된 "분류별 비율" 제목과 이미지 블록 찾기
-    for i, block in enumerate(blocks):
+    for block in blocks:
         if block['type'] == 'heading_2' and '분류별 비율' in block.get('heading_2', {}).get('rich_text', [{}])[0].get('text', {}).get('content', ''):
-            chart_heading_id = block['id']
-            if i + 1 < len(blocks) and blocks[i+1]['type'] == 'image':
-                chart_image_id = blocks[i+1]['id']
-            break
+            heading_found = True
+        if block['type'] == 'column_list':
+            old_column_list_id = block['id']
 
-    # 4. 블록 업데이트 또는 신규 생성
-    if chart_image_id:
-        notion_patch(f"blocks/{chart_image_id}", {
-            'image': {
-                'type': 'external',
-                'external': {'url': raw_image_url}
+    # 🔄 이미 만들어진 단(Column)이 있다면 중복 방지를 위해 삭제
+    if old_column_list_id:
+        try:
+            import requests
+            requests.delete(f'{BASE}/blocks/{old_column_list_id}', headers=HEADERS)
+            print("  🔄 기존 단(Column) 블록 삭제 완료")
+        except Exception as e:
+            print(f"  ⚠️ 기존 블록 삭제 실패: {e}")
+
+    # 3. 2단 레이아웃 블록 구성 (왼쪽: 이미지, 오른쪽: 금액 표)
+    column_list_block = {
+        'type': 'column_list',
+        'column_list': {},
+        'children': [
+            {
+                'type': 'column',
+                'column': {},
+                'children': [
+                    {
+                        'type': 'image',
+                        'image': {
+                            'type': 'external',
+                            'external': {'url': raw_image_url}
+                        }
+                    }
+                ]
+            },
+            {
+                'type': 'column',
+                'column': {},
+                'children': [
+                    {
+                        'type': 'callout',
+                        'callout': {
+                            'rich_text': callout_rich_text,
+                            'icon': {'type': 'emoji', 'emoji': '💰'},
+                            'color': 'gray_background'
+                        }
+                    }
+                ]
             }
-        })
-        print(f"  🔄 기존 파이차트 블록 업데이트 완료 (버전: {timestamp})")
-    else:
+        ]
+    }
+
+    # 4. 노션에 최종 반영
+    if not heading_found:
         new_blocks = [
             {'type': 'divider', 'divider': {}},
             {'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '📊 분류별 비율'}}]}},
-            {'type': 'image', 'image': {'type': 'external', 'external': {'url': raw_image_url}}}
+            column_list_block
         ]
-        # 에러 났던 부분을 수정한 코드 (notion_patch)
         notion_patch(f'blocks/{clean_page_id}/children', {'children': new_blocks})
-        print("  ➕ 파이차트 섹션 신규 생성 완료")
+        print("  ➕ 파이차트 및 금액 표 섹션 신규 생성 완료")
+    else:
+        notion_patch(f'blocks/{clean_page_id}/children', {'children': [column_list_block]})
+        print("  ⚡ 분류별 레이아웃(단) 업데이트 완료")
 
 """## 셀 15 · 🚀 실행
 > - **최초 설정 시** (`SETUP_MODE = True`): 페이지 생성 + DB 생성 + 초기 데이터 입력
