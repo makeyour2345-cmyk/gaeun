@@ -29,6 +29,7 @@ jobs:
         sudo apt-get install -y fonts-nanum
         python -m pip install --upgrade pip
         pip install requests finance-datareader matplotlib
+        pip install requests FinanceDataReader matplotlib opendartreader pandas
 
     - name: 파이썬 스크립트 실행 (보안 토큰 주입)
       env:
