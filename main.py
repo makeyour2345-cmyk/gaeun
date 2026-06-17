@@ -777,7 +777,6 @@ def analyze_interest_stocks():
     import matplotlib.dates as mdates
     print('\n[Step C] 관심종목 지수별 시계열 차트 및 수익률 분석...')
     
-    # 1. 종목 및 지수 세팅
     stocks = [
         {'name': '테슬라', 'ticker': 'TSLA', 'index': '나스닥100'},
         {'name': '구글(알파벳)', 'ticker': 'GOOG', 'index': '나스닥100'},
@@ -794,14 +793,12 @@ def analyze_interest_stocks():
     ]
 
     index_tickers = {'나스닥100': 'QQQ', '코스피200': '069500', 'S&P500': 'SPY'}
-    
     today = datetime.date.today()
     six_months_ago = today - datetime.timedelta(days=180)
 
     timeseries_data = {}
     final_returns = {}
 
-    # 2. 지수 및 종목 일별 데이터 가져오기 (누적 수익률 계산)
     print("  데이터를 수집하고 있습니다. 잠시만 기다려주세요...")
     for idx_name, idx_ticker in index_tickers.items():
         try:
@@ -825,7 +822,6 @@ def analyze_interest_stocks():
         except:
             final_returns[s['name']] = 0
 
-    # 3. 표(Table)에 들어갈 분석 결과 정리 (-10% 손절 판정 로직 포함)
     results = []
     for s in stocks:
         ret = final_returns.get(s['name'], 0)
@@ -838,14 +834,12 @@ def analyze_interest_stocks():
             'diff': diff, 'status': status
         })
 
-    # 4. 3개의 선 그래프 그리기 (위아래로 배치)
     try:
         plt.rcParams['font.family'] = 'NanumGothic'
     except:
         pass
     plt.rcParams['axes.unicode_minus'] = False
 
-    # 세로로 3칸짜리 도화지 생성
     fig, axes = plt.subplots(3, 1, figsize=(12, 16))
     fig.suptitle('📈 최근 6개월 관심종목 vs 기준지수 추이', fontsize=20, fontweight='bold', y=0.92)
 
@@ -853,29 +847,21 @@ def analyze_interest_stocks():
     
     for i, idx_name in enumerate(indices):
         ax = axes[i]
-        
-        # 기준지수 선 (굵은 검정 점선으로 강조)
         if idx_name in timeseries_data:
             ax.plot(timeseries_data[idx_name].index, timeseries_data[idx_name].values, 
                     label=f'[{idx_name} 지수]', color='black', linewidth=3, linestyle='--')
 
-        # 개별 종목 선들 (얇은 실선)
         group_stocks = [s['name'] for s in stocks if s['index'] == idx_name]
         for s_name in group_stocks:
             if s_name in timeseries_data:
                 ax.plot(timeseries_data[s_name].index, timeseries_data[s_name].values, 
                         label=s_name, linewidth=1.5)
 
-        # 차트 꾸미기
-        ax.axhline(0, color='gray', linewidth=1, linestyle=':') # 0% 가로축
+        ax.axhline(0, color='gray', linewidth=1, linestyle=':')
         ax.set_title(f'{idx_name} 편입 종목 비교', fontsize=15, pad=10)
         ax.set_ylabel('누적 성장률 (%)', fontsize=12)
-        
-        # 표기 단위 (월별)
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%m월'))
         ax.xaxis.set_major_locator(mdates.MonthLocator())
-        
-        # 범례 (차트 밖에 예쁘게 배치)
         ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize=11)
         ax.grid(True, alpha=0.3)
 
@@ -885,9 +871,9 @@ def analyze_interest_stocks():
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     
-    print(f"  ✅ 3단 선 그래프(시계열) 차트 저장 완료: {save_path}")
+    print(f"  ✅ 3단 선 그래프 차트 저장 완료: {save_path}")
     return results
-    
+
 # --- (함수 4) 노션에 관심종목 차트와 표 강력하게 업데이트 ---
 def update_interest_in_notion(main_page_id, github_user, github_repo, results):
     import requests
@@ -896,7 +882,6 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
     clean_page_id = main_page_id.replace('-', '')
     raw_image_url = f"https://raw.githubusercontent.com/{github_user}/{github_repo}/main/interest_chart.png?v={int(time.time())}"
 
-    # 1. 꼬임 방지를 위해 기존 블록 아주 깨끗하게 지우기
     blocks = requests.get(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS).json().get('results', [])
     delete_ids = []
     is_target_section = False
@@ -910,16 +895,13 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
         if is_target_section:
             if block['type'] in ['image', 'table', 'divider']:
                 delete_ids.append(block['id'])
-            elif block['type'] == 'heading_2': # 다른 섹션 나오면 삭제 중지
+            elif block['type'] == 'heading_2':
                 is_target_section = False
                 
     for b_id in delete_ids:
         requests.delete(f"{BASE}/blocks/{b_id}", headers=HEADERS)
 
-    # 2. 노션 표(Table) 데이터 완벽한 규격으로 조립하기
     table_rows = []
-    
-    # 2-1. 표 머리글(헤더)
     table_rows.append({
         "object": "block",
         "type": "table_row",
@@ -933,7 +915,6 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
         ]}
     })
     
-    # 2-2. 표 내용 채우기
     for r in results:
         color = "red" if r['diff'] <= -10 else "default"
         table_rows.append({
@@ -949,7 +930,6 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
             ]}
         })
 
-    # 3. 새로운 차트와 표 한꺼번에 전송
     new_blocks = [
         {'object': 'block', 'type': 'divider', 'divider': {}},
         {'object': 'block', 'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '📊 관심종목 지수대비 분석'}}]}},
@@ -963,7 +943,6 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
     if resp.status_code == 200:
         print("  ✅ 노션 표 및 3단 선 그래프 업데이트 성공!")
     else:
-        # 에러를 숨기지 않고 무조건 빨간불(Exception) 띄우기
         print(f"  ❌ 에러 발생: {resp.text}")
         raise Exception(f"노션 업데이트 실패! 사유: {resp.text}")
         
