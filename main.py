@@ -552,6 +552,8 @@ def run_sync(main_page_id, trade_db_id, holdings_db_id, total_db_id):
     # ================= 2줄 추가 =================
     interest_results = analyze_interest_stocks()
     update_interest_in_notion(main_page_id, GITHUB_USERNAME, GITHUB_REPO_NAME, interest_results)
+    nps_results = fetch_nps_dart_data()
+    update_nps_table_in_notion(main_page_id, nps_results)
 
 """## 셀 14 · 초기 설정 함수 (수정 불필요)"""
 
@@ -948,6 +950,114 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
     else:
         print(f"  ❌ 에러 발생: {resp.text}")
         raise Exception(f"노션 업데이트 실패! 사유: {resp.text}")
+
+# --- (함수 5) 국민연금 최근 2주 공시 긁어오기 (안전 버전) ---
+def fetch_nps_dart_data():
+    import requests
+    import datetime
+    import os
+    print('\n[Step E] 국민연금공단 DART 공시 조회 중...')
+    
+    api_key = os.environ.get('DART_API_KEY')
+    if not api_key:
+        print("  ⚠️ DART API 키가 없습니다. 깃허브 Secrets에 DART_API_KEY를 확인하세요.")
+        return []
+
+    # 최근 14일치 데이터 검색
+    today = datetime.datetime.today()
+    bgn_de = (today - datetime.timedelta(days=14)).strftime('%Y%m%d')
+    end_de = today.strftime('%Y%m%d')
+
+    url = "https://opendart.fss.or.kr/api/list.json"
+    params = {
+        'crtfc_key': api_key,
+        'bgn_de': bgn_de,
+        'end_de': end_de,
+        'pblntf_detail_ty': 'I001', # I001: 주식등의대량보유상황보고서
+        'page_count': 100
+    }
+    
+    try:
+        res = requests.get(url, params=params)
+        data = res.json()
+        
+        nps_list = []
+        if data.get('status') == '000':
+            for item in data.get('list', []):
+                # 제출인이 '국민연금'이 포함된 것만 뽑기
+                if '국민연금' in item.get('flr_nm', ''):
+                    nps_list.append({
+                        'corp_name': item.get('corp_name'),
+                        'date': item.get('rcept_dt')
+                    })
+        print(f"  ✅ 국민연금 공시 {len(nps_list)}건 찾음!")
+        return nps_list
+    except Exception as e:
+        print(f"  ❌ DART 조회 실패: {e}")
+        return []
+
+# --- (함수 6) 노션에 국민연금 표 깔끔하게 업데이트 (중복 삭제 기능 포함) ---
+def update_nps_table_in_notion(main_page_id, nps_data):
+    import requests
+    print('\n[Step F] 노션에 국민연금 표 전송 중...')
+    clean_page_id = main_page_id.replace('-', '')
+    
+    if not nps_data:
+        print("  ⚠️ 업데이트할 국민연금 데이터가 없습니다.")
+        return
+
+    # 1. 꼬임 방지를 위해 기존에 생성된 국민연금 표 지우기
+    blocks = notion_get(f'blocks/{clean_page_id}/children').get('results', [])
+    delete_ids = []
+    is_target_section = False
+    
+    for block in blocks:
+        if block['type'] == 'heading_2' and '국민연금 매매 동향' in block.get('heading_2', {}).get('rich_text', [{}])[0].get('text', {}).get('content', ''):
+            is_target_section = True
+            delete_ids.append(block['id'])
+            continue
+        if is_target_section:
+            if block['type'] in ['table', 'divider']:
+                delete_ids.append(block['id'])
+            elif block['type'] == 'heading_2':
+                is_target_section = False
+                
+    for b_id in delete_ids:
+        requests.delete(f"{BASE}/blocks/{b_id}", headers=HEADERS)
+
+    # 2. 표 머리글 만들기
+    table_rows = [{
+        "object": "block",
+        "type": "table_row",
+        "table_row": {"cells": [
+            [{"type": "text", "text": {"content": "기업명"}, "annotations": {"bold": True}}], 
+            [{"type": "text", "text": {"content": "공시 접수일"}, "annotations": {"bold": True}}]
+        ]}
+    }]
+    
+    # 3. 데이터 채워넣기 (노션 표가 너무 길어지지 않게 최신 15개까지만)
+    for row in nps_data[:15]:
+        table_rows.append({
+            "object": "block",
+            "type": "table_row",
+            "table_row": {"cells": [
+                [{"type": "text", "text": {"content": row['corp_name']}}],
+                [{"type": "text", "text": {"content": row['date']}}]
+            ]}
+        })
+    
+    # 4. 맨 아래에 꽂아넣기
+    new_blocks = [
+        {'object': 'block', 'type': 'divider', 'divider': {}},
+        {'object': 'block', 'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '🏢 최근 국민연금 매매 동향 (DART)'}}]}},
+        {'object': 'block', 'type': 'table', 'table': {'table_width': 2, 'has_column_header': True, 'has_row_header': False, 'children': table_rows}}
+    ]
+    
+    resp = requests.patch(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS, json={'children': new_blocks})
+    if resp.status_code == 200:
+        print("  ✅ 노션 국민연금 표 업데이트 성공!")
+    else:
+        print(f"  ❌ 노션 전송 에러: {resp.text}")
         
 """## 셀 15 · 🚀 실행
 > - **최초 설정 시** (`SETUP_MODE = True`): 페이지 생성 + DB 생성 + 초기 데이터 입력
