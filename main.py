@@ -996,6 +996,31 @@ def analyze_nps_investments():
      
     return nps_data
 
+    # --- 국민연금 표만 따로 독립적으로 노션 맨 아래에 붙이는 함수 ---
+def update_nps_table_in_notion(main_page_id, nps_data):
+    import requests
+    print('\n[Step E] 국민연금 데이터 노션 전송 중...')
+    clean_page_id = main_page_id.replace('-', '')
+    
+    # 1. 국민연금 표 데이터 조립 (표 머리글)
+    table_rows = [{
+        "object": "block",
+        "type": "table_row",
+        "table_row": {"cells": [[{"type": "text", "text": {"content": "기업명"}}], [{"type": "text", "text": {"content": "지분변동"}}]]}
+    }]
+    
+    # 2. 내용 추가 (여기에 실제 데이터 넣기)
+    # ... (여기에 nps_data를 표 블록 형식으로 추가)
+    
+    # 3. 노션 맨 아래에 그냥 '추가(append)' 해버리기
+    new_blocks = [
+        {'object': 'block', 'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '🏢 국민연금 대량보유 공시'}}]}},
+        {'object': 'block', 'type': 'table', 'table': {'table_width': 2, 'children': table_rows}}
+    ]
+    
+    requests.patch(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS, json={'children': new_blocks})
+    print("  ✅ 국민연금 표 추가 완료!")
+    
     # 기존 코드 밑에 추가
     nps_results = analyze_nps_investments()
     update_nps_table_in_notion(config['MAIN_PAGE_ID'], nps_results)
