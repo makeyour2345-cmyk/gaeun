@@ -54,7 +54,7 @@ print('✅ 라이브러리 임포트 완료')
 
 SETUP_MODE     = False   # 설정을 완료했으므로 False로 변경하여 동기화 모드로 전환합니다.
 
-NOTION_TOKEN   = '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'
+NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 PARENT_PAGE_ID = '382f694e353580cbbc6ae4e7d888f50d'
 COLAB_URL      = 'https://colab.research.google.com/drive/1wu5_pr35bJBprg0g4oYoGhyKfjxtiI4U'
 
