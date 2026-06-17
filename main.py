@@ -951,77 +951,69 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
         print(f"  ❌ 에러 발생: {resp.text}")
         raise Exception(f"노션 업데이트 실패! 사유: {resp.text}")
 
-# --- (함수 5) 국민연금 대량보유(5% 룰) 공시 집중 타겟팅 ---
+# --- (함수 5) 국민연금 대량보유 공시 (12주차 실습파일 OpenDartReader 적용 버전) ---
 def fetch_nps_dart_data():
-    import requests
-    import datetime
     import os
-    import time
-    print('\n[Step E] 국민연금 대량보유상황보고서(I001) 집중 타겟 스캔 중...')
+    import datetime
+    try:
+        import OpenDartReader
+        import pandas as pd
+    except ImportError:
+        print("  ⚠️ OpenDartReader 또는 pandas가 설치되지 않았습니다. sync.yml을 확인하세요.")
+        return []
+    
+    print('\n[Step E] 국민연금 대량보유상황보고서 조회 중 (12주차 실습 로직 적용)...')
     
     api_key = os.environ.get('DART_API_KEY')
     if not api_key:
         print("  ⚠️ DART API 키가 없습니다.")
         return []
-
-    url = "https://opendart.fss.or.kr/api/list.json"
-    nps_list = []
-    today = datetime.datetime.today()
-
-    # 대량보유 공시는 분기별로 몰아치기 때문에 6개월(180일)을 2번 나누어 딥서치합니다.
-    for i in range(2):
-        end_date = today - datetime.timedelta(days=i*90)
-        start_date = end_date - datetime.timedelta(days=90)
         
-        page_no = 1
-        # 각 3개월마다 최대 15페이지(1,500건)씩 대량보유 공시만 털어옵니다.
-        while page_no <= 15: 
-            params = {
-                'crtfc_key': api_key,
-                'bgn_de': start_date.strftime('%Y%m%d'),
-                'end_de': end_date.strftime('%Y%m%d'),
-                'pblntf_detail_ty': 'I001',  # 🌟 회원님 아이디어: 대량보유상황보고서 정조준!
-                'page_no': page_no,
-                'page_count': 100
-            }
-            try:
-                res = requests.get(url, params=params)
-                data = res.json()
-                
-                if data.get('status') == '000':
-                    for item in data.get('list', []):
-                        flr = item.get('flr_nm', '')
-                        rpt = item.get('report_nm', '')
-                        # 제출인이나 보고서명에 국민연금이 있으면 무조건 수집
-                        if '국민연금' in flr or '국민연금' in rpt:
-                            nps_list.append({
-                                'corp_name': item.get('corp_name'),
-                                'date': item.get('rcept_dt')
-                            })
-                    
-                    total_page = data.get('total_page', 1)
-                    if page_no >= total_page:
-                        break  # 이 기간의 공시를 다 봤으면 탈출
-                    
-                    page_no += 1
-                    time.sleep(0.3)  # DART 서버 과부하 방지
-                else:
-                    break
-            except Exception as e:
-                print(f"  ❌ 조회 중 에러: {e}")
-                break
+    try:
+        dart = OpenDartReader(api_key)
+        
+        # 노션 표가 터지지 않게 최근 6개월(180일) 치만 조회합니다.
+        end_date = datetime.datetime.now()
+        start_date = end_date - datetime.timedelta(days=180)
+        
+        # 실습 코드: kind='D' (지분공시)
+        s_date_str = start_date.strftime('%Y%m%d')
+        e_date_str = end_date.strftime('%Y%m%d')
+        df = dart.list(start=s_date_str, end=e_date_str, kind='D')
+        
+        if df is None or df.empty:
+            print("  ⚠️ 해당 기간에 조회된 지분공시가 없습니다.")
+            return []
+            
+        # 🌟 실습 파일의 판다스 필터링 로직 그대로 적용!
+        df = df[df['report_nm'].str.contains('대량보유', na=False)]
+        df = df[df['flr_nm'] == '국민연금공단']
+        
+        if df.empty:
+            print("  ⚠️ 필터링 결과 국민연금공단의 대량보유 공시가 없습니다.")
+            return []
 
-    # 동일한 날짜에 같은 기업을 여러 번 공시한 중복 데이터 깔끔하게 제거
-    unique_nps = []
-    seen = set()
-    for item in nps_list:
-        identifier = f"{item['corp_name']}_{item['date']}"
-        if identifier not in seen:
-            seen.add(identifier)
-            unique_nps.append(item)
-
-    print(f"  ✅ 대량보유 정조준 스캔 완료! 총 {len(unique_nps)}건 찾음!")
-    return unique_nps
+        nps_list = []
+        # 실습 코드처럼 접수번호(rcept_no) 기준 중복 제거 및 최신순 정렬
+        df = df.drop_duplicates(subset=['rcept_no'])
+        df = df.sort_values(by='rcept_dt', ascending=False)
+        
+        for _, row in df.iterrows():
+            # 날짜를 노션에서 보기 좋게 20260519 -> 2026-05-19 형식으로 변환
+            raw_date = str(row['rcept_dt'])
+            formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}" if len(raw_date) == 8 else raw_date
+            
+            nps_list.append({
+                'corp_name': row['corp_name'],
+                'date': formatted_date
+            })
+            
+        print(f"  ✅ 실습 코드 적용 완료! 국민연금 공시 총 {len(nps_list)}건 찾음!")
+        return nps_list
+        
+    except Exception as e:
+        print(f"  ❌ OpenDartReader 조회 중 에러 발생: {e}")
+        return []
     
 # --- (함수 6) 노션에 국민연금 표 깔끔하게 업데이트 (0건 방어 추가) ---
 def update_nps_table_in_notion(main_page_id, nps_data):
