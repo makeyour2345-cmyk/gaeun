@@ -979,51 +979,128 @@ else:
             total_db_id    = config['TOTAL_ASSETS_DB_ID']
         )
 
-def analyze_nps_investments():
-    import OpenDartReader
+# --- (함수 5) 국민연금 최근 2주 공시 긁어오기 (안전 버전) ---
+def fetch_nps_dart_data():
+    import requests
+    import datetime
     import os
-    print('\n[Step E] 국민연금공단 대량보유 공시 분석 시작...')
+    print('\n[Step E] 국민연금공단 DART 공시 조회 중...')
     
     api_key = os.environ.get('DART_API_KEY')
-    dart = OpenDartReader(api_key)
-    
-    # 최근 1개월간의 대량보유 보고서 조회
-    df = dart.list(kind='공시', start='2026-05-01', pblntf_detail_ty='a') # 예시 기간
-    nps_reports = df[df['rcept_nm'].str.contains('국민연금공단', na=False)]
-    
-    # 💡 여기서 분석된 데이터를 정리하여 노션 표로 보낼 준비를 합니다.
-    # ... (데이터 처리 로직)
-     
-    return nps_data
+    if not api_key:
+        print("  ⚠️ DART API 키가 없습니다. 조회를 건너뜁니다.")
+        return []
 
-    # --- 국민연금 표만 따로 독립적으로 노션 맨 아래에 붙이는 함수 ---
+    # 최근 14일치 데이터 검색
+    today = datetime.datetime.today()
+    bgn_de = (today - datetime.timedelta(days=14)).strftime('%Y%m%d')
+    end_de = today.strftime('%Y%m%d')
+
+    url = "https://opendart.fss.or.kr/api/list.json"
+    params = {
+        'crtfc_key': api_key,
+        'bgn_de': bgn_de,
+        'end_de': end_de,
+        'pblntf_detail_ty': 'I001', # I001: 주식등의대량보유상황보고서
+        'page_count': 100
+    }
+    
+    try:
+        res = requests.get(url, params=params)
+        data = res.json()
+        
+        nps_list = []
+        if data.get('status') == '000':
+            for item in data['list']:
+                # 제출인이 '국민연금공단'인 것만 쏙쏙 뽑기
+                if '국민연금공단' in item.get('flr_nm', ''):
+                    nps_list.append({
+                        'corp_name': item.get('corp_name'),
+                        'date': item.get('rcept_dt')
+                    })
+        print(f"  ✅ 국민연금 공시 {len(nps_list)}건 찾음!")
+        return nps_list
+    except Exception as e:
+        print(f"  ❌ DART 조회 실패: {e}")
+        return []
+
+# --- (함수 6) 노션 맨 아래에 국민연금 표 강제로 꽂아넣기 ---
 def update_nps_table_in_notion(main_page_id, nps_data):
     import requests
-    print('\n[Step E] 국민연금 데이터 노션 전송 중...')
+    print('\n[Step F] 노션에 국민연금 표 전송 중...')
     clean_page_id = main_page_id.replace('-', '')
     
-    # 1. 국민연금 표 데이터 조립 (표 머리글)
+    if not nps_data:
+        print("  ⚠️ 업데이트할 국민연금 데이터가 없습니다.")
+        return
+
+    # 표 머리글 만들기
     table_rows = [{
         "object": "block",
         "type": "table_row",
-        "table_row": {"cells": [[{"type": "text", "text": {"content": "기업명"}}], [{"type": "text", "text": {"content": "지분변동"}}]]}
+        "table_row": {"cells": [
+            [{"type": "text", "text": {"content": "기업명"}, "annotations": {"bold": True}}], 
+            [{"type": "text", "text": {"content": "공시 접수일"}, "annotations": {"bold": True}}]
+        ]}
     }]
     
-    # 2. 내용 추가 (여기에 실제 데이터 넣기)
-    # ... (여기에 nps_data를 표 블록 형식으로 추가)
+    # 데이터 채워넣기 (최대 10개까지만)
+    for row in nps_data[:10]:
+        table_rows.append({
+            "object": "block",
+            "type": "table_row",
+            "table_row": {"cells": [
+                [{"type": "text", "text": {"content": row['corp_name']}}],
+                [{"type": "text", "text": {"content": row['date']}}]
+            ]}
+        })
     
-    # 3. 노션 맨 아래에 그냥 '추가(append)' 해버리기
+    # 기존 차트들을 건드리지 않고, '새로운 블록'으로 맨 아래에 추가 (append)
     new_blocks = [
-        {'object': 'block', 'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '🏢 국민연금 대량보유 공시'}}]}},
-        {'object': 'block', 'type': 'table', 'table': {'table_width': 2, 'children': table_rows}}
+        {'object': 'block', 'type': 'divider', 'divider': {}},
+        {'object': 'block', 'type': 'heading_2', 'heading_2': {'rich_text': [{'type': 'text', 'text': {'content': '🏢 최근 국민연금 매매 동향 (DART)'}}]}},
+        {'object': 'block', 'type': 'table', 'table': {'table_width': 2, 'has_column_header': True, 'has_row_header': False, 'children': table_rows}}
     ]
     
-    requests.patch(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS, json={'children': new_blocks})
-    print("  ✅ 국민연금 표 추가 완료!")
+    resp = requests.patch(f'{BASE}/blocks/{clean_page_id}/children', headers=HEADERS, json={'children': new_blocks})
+    if resp.status_code == 200:
+        print("  ✅ 노션 국민연금 표 업데이트 성공!")
+    else:
+        print(f"  ❌ 노션 전송 에러: {resp.text}")
+
+if __name__ == "__main__":
+    import os
+    NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
+    BASE = "https://api.notion.com/v1"
+    HEADERS = {
+        "Authorization": f"Bearer {NOTION_TOKEN}",
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json"
+    }
+
+    GITHUB_USERNAME = "makeyour2345-cmyk"
+    GITHUB_REPO_NAME = "gaeun"
     
-    # 기존 코드 밑에 추가
-    nps_results = analyze_nps_investments()
+    config = {
+        'MAIN_PAGE_ID':       '382f694e353581c38d1ff7f9965d54e4',
+        'TRADE_DB_ID':        '382f694e353581ad80a3fd6d0d043371',
+        'HOLDINGS_DB_ID':     '382f694e353581a681bbf2e780a33dfd',
+        'TOTAL_ASSETS_DB_ID': '382f694e353581dabf85f8c7791da870'
+    }
+
+    # 1. 파이차트 및 금액 표 업데이트 (기존)
+    chart_generated, cat_totals = generate_pie_chart(holdings, prices)
+    if chart_generated:
+        update_chart_in_notion(config['MAIN_PAGE_ID'], GITHUB_USERNAME, GITHUB_REPO_NAME, cat_totals)
+
+    # 2. 관심종목 차트 및 표 업데이트 (기존)
+    interest_results = analyze_interest_stocks()
+    update_interest_in_notion(config['MAIN_PAGE_ID'], GITHUB_USERNAME, GITHUB_REPO_NAME, interest_results)
+
+    # 3. 국민연금 공시 업데이트 (★ 방금 만든 2줄은 여기로 와야 합니다!)
+    # 위에 있는 interest_results... 와 왼쪽 시작 위치(빈칸 개수)가 완벽하게 똑같아야 합니다.
+    nps_results = fetch_nps_dart_data()
     update_nps_table_in_notion(config['MAIN_PAGE_ID'], nps_results)
-    
+   
 # 이 셀은 중복 생성을 방지하기 위해 비워두었습니다.
 # 이제 셀 15를 실행하면 기존 콜아웃의 날짜만 자동으로 업데이트됩니다.
