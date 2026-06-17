@@ -7,9 +7,7 @@ Original file is located at
     https://colab.research.google.com/drive/1wu5_pr35bJBprg0g4oYoGhyKfjxtiI4U
 """
 
-!sudo apt-get install -y fonts-nanum
-!sudo fc-cache -fv
-!rm ~/.cache/matplotlib -rf
+
 
 # 이 셀은 중복 생성을 방지하기 위해 비워두었습니다.
 # 이제 셀 15를 실행하면 기존 콜아웃의 날짜만 자동으로 업데이트됩니다.
