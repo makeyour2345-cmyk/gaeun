@@ -1,0 +1,44 @@
+name: Notion Portfolio Sync
+
+on:
+  schedule:
+    # 한국 시간 기준 매일 오전 9시 (UTC 기준 0시) 실행
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 버튼을 눌러서 수동으로도 실행할 수 있게 해줌
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    # 봇이 레포지토리에 차트 이미지를 저장할 수 있도록 권한 부여
+    permissions:
+      contents: write
+
+    steps:
+    - name: 저장소 코드 불러오기
+      uses: actions/checkout@v3
+
+    - name: 파이썬 환경 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 라이브러리 및 나눔폰트 설치
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y fonts-nanum
+        python -m pip install --upgrade pip
+        pip install requests finance-datareader matplotlib
+
+    - name: 파이썬 스크립트 실행 (보안 토큰 주입)
+      env:
+        NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      run: python main.py
+
+    - name: 깃허브에 차트 이미지 저장 (자동 갱신)
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add portfolio_chart.png
+        git commit -m "📊 파이차트 업데이트" || echo "변경된 내용이 없습니다"
+        git push
