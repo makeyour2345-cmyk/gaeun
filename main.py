@@ -963,9 +963,9 @@ def fetch_nps_dart_data():
         print("  ⚠️ DART API 키가 없습니다. 깃허브 Secrets에 DART_API_KEY를 확인하세요.")
         return []
 
-    # 최근 14일치 데이터 검색
+    # 최근 90일치 데이터 검색
     today = datetime.datetime.today()
-    bgn_de = (today - datetime.timedelta(days=14)).strftime('%Y%m%d')
+    bgn_de = (today - datetime.timedelta(days=90)).strftime('%Y%m%d')
     end_de = today.strftime('%Y%m%d')
 
     url = "https://opendart.fss.or.kr/api/list.json"
