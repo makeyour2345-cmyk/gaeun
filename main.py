@@ -979,5 +979,26 @@ else:
             total_db_id    = config['TOTAL_ASSETS_DB_ID']
         )
 
+def analyze_nps_investments():
+    import OpenDartReader
+    import os
+    print('\n[Step E] 국민연금공단 대량보유 공시 분석 시작...')
+    
+    api_key = os.environ.get('DART_API_KEY')
+    dart = OpenDartReader(api_key)
+    
+    # 최근 1개월간의 대량보유 보고서 조회
+    df = dart.list(kind='공시', start='2026-05-01', pblntf_detail_ty='a') # 예시 기간
+    nps_reports = df[df['rcept_nm'].str.contains('국민연금공단', na=False)]
+    
+    # 💡 여기서 분석된 데이터를 정리하여 노션 표로 보낼 준비를 합니다.
+    # ... (데이터 처리 로직)
+     
+    return nps_data
+
+    # 기존 코드 밑에 추가
+    nps_results = analyze_nps_investments()
+    update_nps_table_in_notion(config['MAIN_PAGE_ID'], nps_results)
+    
 # 이 셀은 중복 생성을 방지하기 위해 비워두었습니다.
 # 이제 셀 15를 실행하면 기존 콜아웃의 날짜만 자동으로 업데이트됩니다.
