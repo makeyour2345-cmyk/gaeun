@@ -951,13 +951,13 @@ def update_interest_in_notion(main_page_id, github_user, github_repo, results):
         print(f"  ❌ 에러 발생: {resp.text}")
         raise Exception(f"노션 업데이트 실패! 사유: {resp.text}")
 
-# --- (함수 5) 국민연금 공시 긁어오기 (전체 시장 스캔 딥서치 버전) ---
+# --- (함수 5) 국민연금 대량보유(5% 룰) 공시 집중 타겟팅 ---
 def fetch_nps_dart_data():
     import requests
     import datetime
     import os
     import time
-    print('\n[Step E] 국민연금공단 DART 공시 딥서치 중 (최근 1개월, 전체 페이지 스캔)...')
+    print('\n[Step E] 국민연금 대량보유상황보고서(I001) 집중 타겟 스캔 중...')
     
     api_key = os.environ.get('DART_API_KEY')
     if not api_key:
@@ -966,55 +966,62 @@ def fetch_nps_dart_data():
 
     url = "https://opendart.fss.or.kr/api/list.json"
     nps_list = []
-    
-    # 국민연금은 매월 10일에 공시를 쏟아내므로 최근 30일만 아주 깊게 파봅니다.
     today = datetime.datetime.today()
-    start_date = today - datetime.timedelta(days=30)
-    
-    page_no = 1
-    max_pages = 20 # 최대 20페이지(최근 2,000건)까지 스캔하여 로봇 과부하 방지
 
-    while page_no <= max_pages:
-        params = {
-            'crtfc_key': api_key,
-            'bgn_de': start_date.strftime('%Y%m%d'),
-            'end_de': today.strftime('%Y%m%d'),
-            'pblntf_detail_ty': 'I001', # 대량보유 공시만
-            'page_no': page_no,         # 🌟 핵심: 페이지 번호를 넘깁니다!
-            'page_count': 100
-        }
-        try:
-            res = requests.get(url, params=params)
-            data = res.json()
-            
-            if data.get('status') == '000':
-                for item in data.get('list', []):
-                    # 제출인이나 보고서 제목에 '국민연금'이 있으면 쓸어 담기!
-                    if '국민연금' in item.get('flr_nm', '') or '국민연금' in item.get('report_nm', ''):
-                        nps_list.append({
-                            'corp_name': item.get('corp_name'),
-                            'date': item.get('rcept_dt')
-                        })
+    # 대량보유 공시는 분기별로 몰아치기 때문에 6개월(180일)을 2번 나누어 딥서치합니다.
+    for i in range(2):
+        end_date = today - datetime.timedelta(days=i*90)
+        start_date = end_date - datetime.timedelta(days=90)
+        
+        page_no = 1
+        # 각 3개월마다 최대 15페이지(1,500건)씩 대량보유 공시만 털어옵니다.
+        while page_no <= 15: 
+            params = {
+                'crtfc_key': api_key,
+                'bgn_de': start_date.strftime('%Y%m%d'),
+                'end_de': end_date.strftime('%Y%m%d'),
+                'pblntf_detail_ty': 'I001',  # 🌟 회원님 아이디어: 대량보유상황보고서 정조준!
+                'page_no': page_no,
+                'page_count': 100
+            }
+            try:
+                res = requests.get(url, params=params)
+                data = res.json()
                 
-                # 검색된 전체 페이지 수 확인 후, 다 봤으면 탈출!
-                total_page = data.get('total_page', 1)
-                if page_no >= total_page:
+                if data.get('status') == '000':
+                    for item in data.get('list', []):
+                        flr = item.get('flr_nm', '')
+                        rpt = item.get('report_nm', '')
+                        # 제출인이나 보고서명에 국민연금이 있으면 무조건 수집
+                        if '국민연금' in flr or '국민연금' in rpt:
+                            nps_list.append({
+                                'corp_name': item.get('corp_name'),
+                                'date': item.get('rcept_dt')
+                            })
+                    
+                    total_page = data.get('total_page', 1)
+                    if page_no >= total_page:
+                        break  # 이 기간의 공시를 다 봤으면 탈출
+                    
+                    page_no += 1
+                    time.sleep(0.3)  # DART 서버 과부하 방지
+                else:
                     break
-                
-                page_no += 1
-                time.sleep(0.5) # DART 서버가 화내지 않게 0.5초씩 숨 고르기
-                
-            elif data.get('status') == '013': 
-                # "더 이상 데이터가 없습니다" 상태코드
+            except Exception as e:
+                print(f"  ❌ 조회 중 에러: {e}")
                 break
-            else:
-                break
-        except Exception as e:
-            print(f"  ❌ 페이지 {page_no} 조회 중 에러: {e}")
-            break
 
-    print(f"  ✅ 딥서치 완료! 국민연금 공시 총 {len(nps_list)}건 찾음!")
-    return nps_list
+    # 동일한 날짜에 같은 기업을 여러 번 공시한 중복 데이터 깔끔하게 제거
+    unique_nps = []
+    seen = set()
+    for item in nps_list:
+        identifier = f"{item['corp_name']}_{item['date']}"
+        if identifier not in seen:
+            seen.add(identifier)
+            unique_nps.append(item)
+
+    print(f"  ✅ 대량보유 정조준 스캔 완료! 총 {len(unique_nps)}건 찾음!")
+    return unique_nps
     
 # --- (함수 6) 노션에 국민연금 표 깔끔하게 업데이트 (0건 방어 추가) ---
 def update_nps_table_in_notion(main_page_id, nps_data):
